@@ -13,5 +13,5 @@ export default async function RaceCoursePage(props: PageProps<"/races/[id]/cours
   const { id } = await props.params;
   const race = await getRace(id);
   if (!race) notFound();
-  return <RaceFocus race={race} />;
+  return <RaceFocus race={race} backHref={`/races/${race.id}`} />;
 }

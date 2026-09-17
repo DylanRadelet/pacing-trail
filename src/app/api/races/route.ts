@@ -1,4 +1,4 @@
-import { createRace, listRaceSummaries } from "@/lib/race/storage";
+import { createRace, IS_HOSTED, listRaceSummaries, READ_ONLY_RESPONSE } from "@/lib/race/storage";
 import { createRaceSchema } from "@/lib/race/types";
 
 export async function GET() {
@@ -6,6 +6,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (IS_HOSTED) return READ_ONLY_RESPONSE();
   const body = await request.json().catch(() => null);
   const parsed = createRaceSchema.safeParse(body);
   if (!parsed.success) {

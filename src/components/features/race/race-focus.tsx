@@ -134,7 +134,7 @@ function Overview({
   );
 }
 
-export function RaceFocus({ race }: { race: Race }) {
+export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) {
   const track = useMemo(() => buildTrack(race.points), [race.points]);
   const markers = useMemo(
     () => buildMarkers(buildTimeline(track, race.checkpoints, race.aidStations), race.startTime),
@@ -300,7 +300,7 @@ export function RaceFocus({ race }: { race: Race }) {
   return (
     <div className="fixed inset-0 flex h-dvh flex-col overscroll-none bg-background">
       <header className="flex h-12 shrink-0 items-center gap-1 px-1 pt-[env(safe-area-inset-top)]">
-        <Link href={`/races/${race.id}`} className="rounded-full p-2.5 active:bg-stone-200" aria-label="Retour à la préparation">
+        <Link href={backHref} className="rounded-full p-2.5 active:bg-stone-200" aria-label="Retour à la préparation">
           <ArrowLeft className="size-6" />
         </Link>
         <div className="min-w-0 flex-1 truncate text-base font-bold">{race.name}</div>

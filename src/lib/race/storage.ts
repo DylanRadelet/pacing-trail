@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { buildNewRace } from "./create";
 import { buildTrack } from "./track";
 import {
   RACE_ID_PATTERN,
@@ -14,21 +15,18 @@ import {
 // Une course = un fichier JSON lisible dans data/races/<id>.json
 export const RACES_DIR = path.join(process.cwd(), "data", "races");
 
+/** Version en ligne (Vercel) : disque en lecture seule, les courses vivent sur le téléphone. */
+export const IS_HOSTED = process.env.VERCEL === "1";
+
+export const READ_ONLY_RESPONSE = () =>
+  Response.json(
+    { error: "Version en ligne : les courses sont enregistrées dans le téléphone, pas sur le serveur." },
+    { status: 403 },
+  );
+
 export function raceFilePath(id: string): string {
   if (!RACE_ID_PATTERN.test(id)) throw new Error(`Identifiant de course invalide : ${id}`);
   return path.join(RACES_DIR, `${id}.json`);
-}
-
-function slugify(name: string): string {
-  return (
-    name
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 50) || "course"
-  );
 }
 
 /** JSON indenté, mais un point GPS par ligne pour garder un fichier lisible. */
@@ -91,19 +89,7 @@ export async function listRaceSummaries(): Promise<RaceSummary[]> {
 }
 
 export async function createRace(input: CreateRaceInput): Promise<Race> {
-  const now = new Date().toISOString();
-  const race: Race = {
-    version: 1,
-    id: `${slugify(input.name)}-${randomBytes(3).toString("hex")}`,
-    name: input.name,
-    sourceFile: input.sourceFile,
-    createdAt: now,
-    updatedAt: now,
-    startTime: null,
-    checkpoints: [],
-    aidStations: input.aidStations,
-    points: input.points,
-  };
+  const race = buildNewRace(input);
   await writeRace(race);
   return race;
 }

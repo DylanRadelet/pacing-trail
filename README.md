@@ -1,10 +1,15 @@
 # Pacing Run
 
 Préparer sa stratégie de trail : import d'un GPX, carte + profil altimétrique précis,
-temps de passage et ravitaillements. Tout tourne en local, sans base de données :
-chaque course est enregistrée dans `data/races/<id>.json`.
+temps de passage, ravitaillements et un mode course plein écran, sans base de données.
 
-## Lancer
+Deux façons de l'utiliser :
+
+- **Sur le PC** (`pnpm dev`) : chaque course est un fichier JSON dans `data/races/<id>.json`.
+- **Sur le téléphone** (version en ligne, ex. Vercel) : les courses sont enregistrées dans le
+  navigateur du téléphone et l'app fonctionne hors-ligne.
+
+## Lancer sur le PC
 
 ```bash
 pnpm install
@@ -13,15 +18,15 @@ pnpm dev
 
 Puis ouvrir http://localhost:3000.
 
-## Sur le téléphone (même Wi-Fi que le PC)
+## Sur le téléphone (version en ligne)
 
-```bash
-pnpm build
-pnpm start
-```
-
-Ouvrir `http://<IP-du-PC>:3000` sur le téléphone (IP visible avec `ipconfig`, ex. `192.168.0.80`).
-Au premier lancement, autoriser Node.js dans le pare-feu Windows pour les réseaux privés.
+1. Déployer le repo sur Vercel (aucune configuration nécessaire). En ligne, `/` redirige vers
+   `/telephone` et l'API refuse les écritures : rien n'est stocké sur le serveur.
+2. Sur le téléphone, ouvrir l'URL dans Chrome puis ⋮ → « Ajouter à l'écran d'accueil ».
+3. Importer le GPX directement, ou le JSON préparé sur le PC (bouton « Envoyer vers le téléphone »
+   sur la page de la course).
+4. Ouvrir une fois le mode course avec du réseau : ensuite il fonctionne sans réseau
+   (service worker `public/sw.js`), et l'écran reste allumé pendant la course.
 
 ## Utilisation
 
@@ -31,7 +36,8 @@ Au premier lancement, autoriser Node.js dans le pare-feu Windows pour les résea
   avec les boutons « Passage ici » / « Ravito ici ».
 - **Temps de passage** : km + temps depuis le départ. L'allure et le D+ de chaque tronçon sont calculés.
 - **Heure de départ** : affiche l'heure de passage à chaque point.
-- Tout est enregistré automatiquement dans le JSON.
+- **Mode course** : profil seul en portrait ; pincer, double-taper, glisser, ou boutons 1/2/5 km pour zoomer.
+- Tout est enregistré automatiquement.
 
 ## Précision des calculs
 
@@ -43,6 +49,7 @@ Au premier lancement, autoriser Node.js dans le pare-feu Windows pour les résea
 
 ## Code
 
-- `src/lib/race/` : lecture GPX, géodésie, calcul de la trace et du plan, stockage JSON.
-- `src/app/api/races/` : API locale (création, modification, suppression).
-- `src/components/features/race/` : carte (Leaflet), profil, plan, formulaires.
+- `src/lib/race/` : lecture GPX, géodésie, calcul de la trace et du plan, stockage (disque ou navigateur).
+- `src/app/api/races/` : API locale (création, modification, suppression, export JSON).
+- `src/components/features/race/` : carte (Leaflet), profil, plan, mode course, formulaires.
+- `src/components/features/phone/` et `src/app/telephone/` : version téléphone hors-ligne.

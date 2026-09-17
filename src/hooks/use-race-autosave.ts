@@ -1,15 +1,37 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { updateLocalRace } from "@/lib/race/browser-store";
 import type { UpdateRaceInput } from "@/lib/race/types";
 
 export type SaveStatus = "saved" | "saving" | "error";
 
+/** server = JSON sur le disque du PC (API locale) ; browser = stockage du téléphone (version en ligne). */
+export type PersistenceMode = "server" | "browser";
+
 const DEBOUNCE_MS = 500;
 const RETRY_MS = 3000;
 
-/** Enregistre automatiquement le plan dans le JSON de la course, dans l'ordre des modifications. */
-export function useRaceAutosave(raceId: string, data: UpdateRaceInput): SaveStatus {
+async function persist(mode: PersistenceMode, raceId: string, body: string, keepalive = false) {
+  if (mode === "browser") {
+    updateLocalRace(raceId, JSON.parse(body) as UpdateRaceInput);
+    return;
+  }
+  const response = await fetch(`/api/races/${raceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+/** Enregistre automatiquement le plan de la course, dans l'ordre des modifications. */
+export function useRaceAutosave(
+  raceId: string,
+  data: UpdateRaceInput,
+  mode: PersistenceMode = "server",
+): SaveStatus {
   const serialized = JSON.stringify(data);
   const [savedSerialized, setSavedSerialized] = useState(serialized);
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -22,17 +44,11 @@ export function useRaceAutosave(raceId: string, data: UpdateRaceInput): SaveStat
       () => {
         queue.current = queue.current.then(async () => {
           try {
-            const response = await fetch(`/api/races/${raceId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: serialized,
-              keepalive: true,
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await persist(mode, raceId, serialized, true);
             setFailedAttempts(0);
             setSavedSerialized(serialized);
           } catch {
-            // Relance automatique tant que le serveur ne répond pas.
+            // Relance automatique tant que l'enregistrement échoue.
             setFailedAttempts((n) => n + 1);
           }
         });
@@ -40,7 +56,7 @@ export function useRaceAutosave(raceId: string, data: UpdateRaceInput): SaveStat
       failedAttempts > 0 ? RETRY_MS : DEBOUNCE_MS,
     );
     return () => clearTimeout(timer);
-  }, [raceId, serialized, savedSerialized, failedAttempts]);
+  }, [mode, raceId, serialized, savedSerialized, failedAttempts]);
 
   // En quittant la page (lien interne), on envoie tout de suite une modification encore en attente.
   const pending = useRef({ serialized, savedSerialized });
@@ -50,15 +66,9 @@ export function useRaceAutosave(raceId: string, data: UpdateRaceInput): SaveStat
   useEffect(
     () => () => {
       const { serialized: latest, savedSerialized: saved } = pending.current;
-      if (latest === saved) return;
-      void fetch(`/api/races/${raceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: latest,
-        keepalive: true,
-      });
+      if (latest !== saved) void persist(mode, raceId, latest, true).catch(() => undefined);
     },
-    [raceId],
+    [mode, raceId],
   );
 
   const status: SaveStatus =

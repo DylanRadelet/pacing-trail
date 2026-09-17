@@ -5,6 +5,7 @@ import {
   Check,
   CircleAlert,
   CupSoda,
+  Download,
   LoaderCircle,
   Mountain,
   Plus,
@@ -14,7 +15,7 @@ import {
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
-import { useRaceAutosave, type SaveStatus } from "@/hooks/use-race-autosave";
+import { useRaceAutosave, type PersistenceMode, type SaveStatus } from "@/hooks/use-race-autosave";
 import {
   formatClock,
   formatDuration,
@@ -28,6 +29,7 @@ import { buildTrack, gradeAt, sampleAt } from "@/lib/race/track";
 import type { AidStation, Checkpoint, Race } from "@/lib/race/types";
 import { EditSheet, type EditTarget } from "./edit-sheet";
 import { ElevationProfile, GRADE_CLASSES } from "./elevation-profile";
+import { MapErrorBoundary } from "./map-error-boundary";
 import { buildMarkers } from "./markers";
 import { PlanTimeline } from "./plan-timeline";
 
@@ -67,7 +69,18 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function RaceEditor({ race }: { race: Race }) {
+type Props = {
+  race: Race;
+  /** server = PC (JSON sur le disque) ; browser = téléphone (course importée). */
+  mode?: PersistenceMode;
+};
+
+export function RaceEditor({ race, mode = "server" }: Props) {
+  const onPhone = mode === "browser";
+  const homeHref = onPhone ? "/telephone" : "/";
+  const courseHref = onPhone
+    ? `/telephone/course?id=${encodeURIComponent(race.id)}`
+    : `/races/${race.id}/course`;
   const track = useMemo(() => buildTrack(race.points), [race.points]);
   const [name, setName] = useState(race.name);
   const [startTime, setStartTime] = useState<string | null>(race.startTime);
@@ -76,12 +89,11 @@ export function RaceEditor({ race }: { race: Race }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [editing, setEditing] = useState<EditTarget | null>(null);
 
-  const saveStatus = useRaceAutosave(race.id, {
-    name: name.trim() || race.name,
-    startTime,
-    checkpoints,
-    aidStations,
-  });
+  const saveStatus = useRaceAutosave(
+    race.id,
+    { name: name.trim() || race.name, startTime, checkpoints, aidStations },
+    mode,
+  );
 
   const timeline = useMemo(
     () => buildTimeline(track, checkpoints, aidStations),
@@ -116,7 +128,7 @@ export function RaceEditor({ race }: { race: Race }) {
   return (
     <div className="mx-auto w-full max-w-7xl px-3 pb-16 sm:px-5">
       <header className="sticky top-0 z-[1100] -mx-3 mb-3 flex items-center gap-2 border-b border-stone-200 bg-background/95 px-3 py-2 backdrop-blur sm:-mx-5 sm:px-5">
-        <Link href="/" className="rounded-full p-2 hover:bg-stone-200" aria-label="Retour aux courses">
+        <Link href={homeHref} className="rounded-full p-2 hover:bg-stone-200" aria-label="Retour aux courses">
           <ArrowLeft className="size-5" />
         </Link>
         <input
@@ -138,9 +150,9 @@ export function RaceEditor({ race }: { race: Race }) {
         <Stat label="Points GPS" value={String(track.count).replace(/\B(?=(\d{3})+(?!\d))/g, " ")} />
       </div>
 
-      {/* Attend l'enregistrement : la page course relit le JSON sur le disque. */}
+      {/* Attend l'enregistrement : la page course relit la course enregistrée. */}
       <Link
-        href={`/races/${race.id}/course`}
+        href={courseHref}
         aria-disabled={saveStatus !== "saved"}
         className={`mb-3 flex items-center justify-center gap-2 rounded-xl bg-stone-900 px-4 py-3.5 text-base font-semibold text-white shadow-sm hover:bg-stone-800 ${saveStatus !== "saved" ? "pointer-events-none opacity-50" : ""}`}
       >
@@ -148,10 +160,24 @@ export function RaceEditor({ race }: { race: Race }) {
         Mode course · profil plein écran
       </Link>
 
+      {!onPhone && (
+        <a
+          href={`/api/races/${race.id}?download=1`}
+          download={`${race.id}.json`}
+          aria-disabled={saveStatus !== "saved"}
+          className={`mb-3 flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold ring-1 ring-stone-300 hover:bg-stone-100 ${saveStatus !== "saved" ? "pointer-events-none opacity-50" : ""}`}
+        >
+          <Download className="size-4" />
+          Envoyer vers le téléphone (télécharger le JSON)
+        </a>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
         <section className="min-w-0 space-y-3">
           <div className="isolate h-[45vh] min-h-[280px] overflow-hidden rounded-xl ring-1 ring-stone-200">
-            <RaceMap track={track} markers={markers} cursor={cursor} onCursorChange={handleCursor} />
+            <MapErrorBoundary>
+              <RaceMap track={track} markers={markers} cursor={cursor} onCursorChange={handleCursor} />
+            </MapErrorBoundary>
           </div>
 
           <div className="rounded-xl bg-white p-2 ring-1 ring-stone-200">
@@ -270,8 +296,14 @@ export function RaceEditor({ race }: { race: Race }) {
 
           <p className="px-1 text-xs leading-relaxed text-stone-500">
             ≈ = estimation. Entre deux passages, le temps est réparti selon les km-effort (100 m de D+ = 1 km).
-            Distances calculées sur l&apos;ellipsoïde WGS84 à partir de chaque point du GPX. Fichier :{" "}
-            <code className="rounded bg-stone-200 px-1">data/races/{race.id}.json</code>
+            Distances calculées sur l&apos;ellipsoïde WGS84 à partir de chaque point du GPX.{" "}
+            {onPhone ? (
+              "Enregistré sur ce téléphone."
+            ) : (
+              <>
+                Fichier : <code className="rounded bg-stone-200 px-1">data/races/{race.id}.json</code>
+              </>
+            )}
           </p>
         </aside>
       </div>

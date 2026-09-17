@@ -3,6 +3,8 @@
 import { LoaderCircle, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { saveLocalRace } from "@/lib/race/browser-store";
+import { buildNewRace } from "@/lib/race/create";
 import { roundKm } from "@/lib/race/format";
 import { parseGpx } from "@/lib/race/gpx";
 import { buildTrack, nearestOnTrack } from "@/lib/race/track";
@@ -12,7 +14,30 @@ import { createId } from "@/lib/utils/id";
 /** Un waypoint du GPX à moins de cette distance de la trace devient un ravito. */
 const WAYPOINT_MAX_OFFSET_M = 150;
 
-export function GpxImport() {
+type Props = {
+  /** server = JSON sur le disque du PC ; browser = stockage du téléphone (version en ligne). */
+  target?: "server" | "browser";
+};
+
+async function saveOnServer(body: CreateRaceInput): Promise<string> {
+  const response = await fetch("/api/races", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Enregistrement impossible (HTTP ${response.status}).`);
+  const { id } = (await response.json()) as { id: string };
+  return `/races/${id}`;
+}
+
+function saveInBrowser(body: CreateRaceInput): string {
+  const race = buildNewRace(body);
+  saveLocalRace(race);
+  void navigator.storage?.persist?.();
+  return `/telephone/plan?id=${encodeURIComponent(race.id)}`;
+}
+
+export function GpxImport({ target = "server" }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +60,7 @@ export function GpxImport() {
         points: gpx.points,
         aidStations: aidStations.sort((a, b) => a.km - b.km),
       };
-      const response = await fetch("/api/races", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error(`Enregistrement impossible (HTTP ${response.status}).`);
-      const { id } = (await response.json()) as { id: string };
-      router.push(`/races/${id}`);
+      router.push(target === "browser" ? saveInBrowser(body) : await saveOnServer(body));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import impossible.");
       setBusy(false);

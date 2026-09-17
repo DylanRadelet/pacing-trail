@@ -1,12 +1,15 @@
-import { ChevronRight, Mountain } from "lucide-react";
+import { ChevronRight, Mountain, Smartphone } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { DeleteRaceButton } from "@/components/features/race/delete-race-button";
 import { GpxImport } from "@/components/features/race/gpx-import";
 import { formatElevation, formatKm } from "@/lib/race/format";
-import { listRaceSummaries } from "@/lib/race/storage";
+import { IS_HOSTED, listRaceSummaries } from "@/lib/race/storage";
 
 export default async function Home() {
+  // En ligne, pas de disque : l'app démarre sur les courses importées dans le téléphone.
+  if (IS_HOSTED) redirect("/telephone");
   await connection();
   const races = await listRaceSummaries();
 
@@ -52,7 +55,16 @@ export default async function Home() {
         </ul>
       )}
 
-      <p className="mt-8 text-xs text-stone-500">
+      <Link
+        href="/telephone"
+        className="mt-8 flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-medium ring-1 ring-stone-200 hover:ring-stone-400"
+      >
+        <Smartphone className="size-4" />
+        Version téléphone (courses importées, hors-ligne)
+        <ChevronRight className="ml-auto size-4 text-stone-400" />
+      </Link>
+
+      <p className="mt-4 text-xs text-stone-500">
         Tout reste sur ton ordinateur : chaque course est un fichier JSON dans{" "}
         <code className="rounded bg-stone-200 px-1">data/races/</code>.
       </p>
