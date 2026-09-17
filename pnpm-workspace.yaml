@@ -1,3 +1,8 @@
+# pnpm 11+ : configuration des builds natifs autorisés.
+# Doc: https://pnpm.io/settings
+strictDepBuilds: false
 allowBuilds:
-  sharp: false
-  unrs-resolver: false
+  sharp: true
+  unrs-resolver: true
+  "@tailwindcss/oxide": true
+  esbuild: true
