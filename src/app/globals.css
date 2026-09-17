@@ -1,26 +1,97 @@
 @import "tailwindcss";
 
+/* Thème clair à fort contraste : lisible en plein soleil sur le parcours. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f5f4;
+  --foreground: #1c1917;
+  --checkpoint: #2563eb;
+  --aid: #ea580c;
+  --track: #dc2626;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-checkpoint: var(--checkpoint);
+  --color-aid: var(--aid);
+  --color-track: var(--track);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Marqueurs de la carte (divIcon Leaflet) */
+.map-km {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid var(--track);
+  color: #1c1917;
+  font: 700 10px/1 var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.map-endpoint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  border: 3px solid #fff;
+  color: #fff;
+  font: 800 12px/1 var(--font-geist-sans), system-ui, sans-serif;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+}
+
+.map-pin {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 8px;
+  color: #fff;
+  font: 700 12px/1.1 var(--font-geist-sans), system-ui, sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  transform: translate(-50%, calc(-100% - 7px));
+}
+
+.map-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom: 0;
+  border-top-color: inherit;
+}
+
+.map-pin--checkpoint {
+  background: var(--checkpoint);
+  border-top-color: var(--checkpoint);
+}
+
+.map-pin--aid {
+  background: var(--aid);
+  border-top-color: var(--aid);
+}
+
+.map-cursor {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #1c1917;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 2px #1c1917, 0 2px 6px rgb(0 0 0 / 0.45);
 }

@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pacing Run
 
-## Getting Started
+Préparer sa stratégie de trail : import d'un GPX, carte + profil altimétrique précis,
+temps de passage et ravitaillements. Tout tourne en local, sans base de données :
+chaque course est enregistrée dans `data/races/<id>.json`.
 
-First, run the development server:
+## Lancer
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Puis ouvrir http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Sur le téléphone (même Wi-Fi que le PC)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm build
+pnpm start
+```
 
-## Learn More
+Ouvrir `http://<IP-du-PC>:3000` sur le téléphone (IP visible avec `ipconfig`, ex. `192.168.0.80`).
+Au premier lancement, autoriser Node.js dans le pare-feu Windows pour les réseaux privés.
 
-To learn more about Next.js, take a look at the following resources:
+## Utilisation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Importer un fichier GPX** : la trace est lue point par point ; les waypoints du GPX situés
+  à moins de 150 m du parcours sont proposés comme ravitos.
+- **Toucher le profil ou la trace** : km, altitude, pente, D+/D- cumulés et temps prévu à cet endroit,
+  avec les boutons « Passage ici » / « Ravito ici ».
+- **Temps de passage** : km + temps depuis le départ. L'allure et le D+ de chaque tronçon sont calculés.
+- **Heure de départ** : affiche l'heure de passage à chaque point.
+- Tout est enregistré automatiquement dans le JSON.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Précision des calculs
 
-## Deploy on Vercel
+- Distances géodésiques sur l'ellipsoïde WGS84 (formule de Vincenty) entre chaque point du GPX,
+  sans simplification de la trace.
+- D+ / D- sur l'altitude lissée sur 40 m pour gommer le bruit GPS.
+- Temps estimés (≈) entre deux passages répartis au prorata des km-effort (100 m de D+ = 1 km),
+  au-delà du dernier passage extrapolés à l'allure moyenne du plan.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Code
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/race/` : lecture GPX, géodésie, calcul de la trace et du plan, stockage JSON.
+- `src/app/api/races/` : API locale (création, modification, suppression).
+- `src/components/features/race/` : carte (Leaflet), profil, plan, formulaires.
