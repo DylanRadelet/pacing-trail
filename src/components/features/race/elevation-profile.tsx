@@ -25,6 +25,8 @@ type Props = {
   onCursorChange?: (distance: number | null) => void;
   view?: ProfileView;
   variant?: ProfileVariant;
+  /** Position GPS du coureur sur le parcours (stale = signal perdu depuis un moment). */
+  position?: { distance: number; stale: boolean } | null;
 };
 
 const LAYOUTS = {
@@ -92,6 +94,7 @@ export function ElevationProfile({
   onCursorChange,
   view,
   variant = "compact",
+  position = null,
 }: Props) {
   const layout = LAYOUTS[variant];
   const M = layout.margin;
@@ -215,6 +218,9 @@ export function ElevationProfile({
   };
 
   const cursorSample = cursor === null || !inView(cursor) ? null : sampleAt(track, cursor);
+  const positionSample = position && inView(position.distance) ? sampleAt(track, position.distance) : null;
+  // Partie déjà courue (grisée), limitée à la zone affichée.
+  const doneWidth = position ? Math.min(plotW, Math.max(0, x(position.distance) - M.left)) : 0;
   const focus = variant === "focus";
   const { label } = layout;
 
@@ -282,6 +288,9 @@ export function ElevationProfile({
             />
           ))}
           <path d={chart.line} fill="none" stroke="#44403c" strokeWidth={focus ? 2 : 1.4} />
+          {doneWidth > 0 && (
+            <rect x={M.left} y={M.top} width={doneWidth} height={plotH} fill="#f5f5f4" opacity={0.6} />
+          )}
 
           {chart.kmTicks.map((t) => (
             <text
@@ -415,6 +424,28 @@ export function ElevationProfile({
                 fill="#1c1917"
                 stroke="#fff"
                 strokeWidth={2}
+              />
+            </g>
+          )}
+
+          {positionSample && (
+            <g pointerEvents="none" opacity={position?.stale ? 0.45 : 1}>
+              <line
+                x1={x(positionSample.distance)}
+                x2={x(positionSample.distance)}
+                y1={M.top - 4}
+                y2={plotBottom}
+                stroke="var(--me)"
+                strokeWidth={focus ? 3 : 2}
+              />
+              <circle cx={x(positionSample.distance)} cy={chart.y(positionSample.ele)} r={focus ? 17 : 11} fill="var(--me)" opacity={0.25} />
+              <circle
+                cx={x(positionSample.distance)}
+                cy={chart.y(positionSample.ele)}
+                r={focus ? 9 : 6}
+                fill="var(--me)"
+                stroke="#fff"
+                strokeWidth={3}
               />
             </g>
           )}

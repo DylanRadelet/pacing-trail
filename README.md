@@ -37,6 +37,9 @@ Puis ouvrir http://localhost:3000.
 - **Temps de passage** : km + temps depuis le départ. L'allure et le D+ de chaque tronçon sont calculés.
 - **Heure de départ** : affiche l'heure de passage à chaque point.
 - **Mode course** : profil seul en portrait ; pincer, double-taper, glisser, ou boutons 1/2/5 km pour zoomer.
+- **GPS** (version en ligne, HTTPS) : ta position sur le profil, la vue qui te suit, l'écart au plan
+  (bouton « Départ » = chrono), le prochain passage ou ravito, les km et le D+ restants. Sur une boucle,
+  le départ et l'arrivée sont départagés grâce à la dernière position connue ou au plan.
 - Tout est enregistré automatiquement.
 
 ## Précision des calculs

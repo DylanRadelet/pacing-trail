@@ -185,3 +185,23 @@ export function buildTimeline(
   const order = { start: 0, checkpoint: 1, aid: 2, finish: 3 };
   return entries.sort((a, b) => a.distance - b.distance || order[a.type] - order[b.type]);
 }
+
+/** Distance où le plan prévoit d'être après `elapsedSec` (inverse de plannedTimeAt). */
+export function plannedDistanceAt(
+  track: Track,
+  checkpoints: Checkpoint[],
+  elapsedSec: number,
+): number | null {
+  if (checkpoints.length === 0) return null;
+  const timeAt = (distance: number) => plannedTimeAt(track, checkpoints, distance)?.timeSec ?? 0;
+  if (elapsedSec <= 0) return 0;
+  if (elapsedSec >= timeAt(track.totalDistance)) return track.totalDistance;
+  let lo = 0;
+  let hi = track.totalDistance;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (timeAt(mid) < elapsedSec) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}

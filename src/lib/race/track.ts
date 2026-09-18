@@ -180,37 +180,68 @@ export function gradeAt(track: Track, distance: number): number {
   return gradeBetween(track, distance - GRADE_HALF_WINDOW_M, distance + GRADE_HALF_WINDOW_M);
 }
 
+
+export type TrackPoint2D = { distance: number; offset: number };
+
+/** Mètres par degré autour d'une latitude (plan local, précis à l'échelle de quelques km). */
+function metersPerDegree(lat: number) {
+  return { mLat: 111132.92, mLon: 111412.84 * Math.cos((lat * Math.PI) / 180) };
+}
+
+/** Projection d'un point sur le segment [i, i+1] : distance le long de la trace et écart en mètres. */
+function projectOnSegment(
+  track: Track,
+  i: number,
+  lat: number,
+  lon: number,
+  mLat: number,
+  mLon: number,
+): TrackPoint2D {
+  const ax = (track.lon[i] - lon) * mLon;
+  const ay = (track.lat[i] - lat) * mLat;
+  const bx = (track.lon[i + 1] - lon) * mLon;
+  const by = (track.lat[i + 1] - lat) * mLat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq > 0 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / lenSq)) : 0;
+  return {
+    distance: track.dist[i] + t * (track.dist[i + 1] - track.dist[i]),
+    offset: Math.hypot(ax + t * dx, ay + t * dy),
+  };
+}
+
 /**
  * Point de la trace le plus proche d'une coordonnée (projection sur chaque segment).
  * Renvoie la distance le long de la trace et l'écart en mètres.
  */
-export function nearestOnTrack(
-  track: Track,
-  lat: number,
-  lon: number,
-): { distance: number; offset: number } {
-  const mPerDegLat = 111132.92;
-  const mPerDegLon = 111412.84 * Math.cos((lat * Math.PI) / 180);
-  let best = { distance: 0, offset: Infinity };
-
-  for (let i = 0; i < track.count; i++) {
-    const ax = (track.lon[i] - lon) * mPerDegLon;
-    const ay = (track.lat[i] - lat) * mPerDegLat;
-    if (i === track.count - 1) {
-      const offset = Math.hypot(ax, ay);
-      if (offset < best.offset) best = { distance: track.dist[i], offset };
-      break;
-    }
-    const bx = (track.lon[i + 1] - lon) * mPerDegLon;
-    const by = (track.lat[i + 1] - lat) * mPerDegLat;
-    const dx = bx - ax;
-    const dy = by - ay;
-    const lenSq = dx * dx + dy * dy;
-    const t = lenSq > 0 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / lenSq)) : 0;
-    const offset = Math.hypot(ax + t * dx, ay + t * dy);
-    if (offset < best.offset) {
-      best = { distance: track.dist[i] + t * (track.dist[i + 1] - track.dist[i]), offset };
-    }
+export function nearestOnTrack(track: Track, lat: number, lon: number): TrackPoint2D {
+  const { mLat, mLon } = metersPerDegree(lat);
+  let best: TrackPoint2D = { distance: 0, offset: Infinity };
+  for (let i = 0; i < track.count - 1; i++) {
+    const p = projectOnSegment(track, i, lat, lon, mLat, mLon);
+    if (p.offset < best.offset) best = p;
   }
   return best;
+}
+
+/**
+ * Chaque passage de la trace à moins de `maxOffset` m du point (le meilleur point de chaque passage),
+ * dans l'ordre du parcours. Une boucle ou un aller-retour donne plusieurs passages au même endroit.
+ */
+export function trackPassesNear(track: Track, lat: number, lon: number, maxOffset: number): TrackPoint2D[] {
+  const { mLat, mLon } = metersPerDegree(lat);
+  const passes: TrackPoint2D[] = [];
+  let current: TrackPoint2D | null = null;
+  for (let i = 0; i < track.count - 1; i++) {
+    const p = projectOnSegment(track, i, lat, lon, mLat, mLon);
+    if (p.offset <= maxOffset) {
+      if (!current || p.offset < current.offset) current = p;
+    } else if (current) {
+      passes.push(current);
+      current = null;
+    }
+  }
+  if (current) passes.push(current);
+  return passes;
 }

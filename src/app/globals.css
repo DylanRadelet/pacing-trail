@@ -7,6 +7,7 @@
   --checkpoint: #2563eb;
   --aid: #ea580c;
   --track: #dc2626;
+  --me: #0284c7;
 }
 
 @theme inline {
@@ -15,6 +16,7 @@
   --color-checkpoint: var(--checkpoint);
   --color-aid: var(--aid);
   --color-track: var(--track);
+  --color-me: var(--me);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

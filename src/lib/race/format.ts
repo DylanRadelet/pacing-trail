@@ -51,3 +51,20 @@ export function parseKm(text: string): number | null {
 export function roundKm(km: number): number {
   return Math.round(km * 1000) / 1000;
 }
+
+/** 3733 → "1:02:13" (chrono). */
+export function formatElapsed(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Écart au plan : 125 → "+2:05" (retard), -80 → "−1:20" (avance). */
+export function formatDelta(deltaSec: number): string {
+  const s = Math.round(Math.abs(deltaSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const body = h > 0 ? `${h}:${String(m).padStart(2, "0")}` : String(m);
+  return `${deltaSec < 0 ? "−" : "+"}${body}:${String(s % 60).padStart(2, "0")}`;
+}

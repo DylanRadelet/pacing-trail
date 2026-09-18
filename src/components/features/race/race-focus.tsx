@@ -1,24 +1,47 @@
 "use client";
 
-import { ArrowLeft, Maximize, Minimize, Minus, Plus, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Locate,
+  LocateFixed,
+  LocateOff,
+  Maximize,
+  Minimize,
+  Minus,
+  Play,
+  Plus,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
+import { useGpsPosition } from "@/hooks/use-gps-position";
+import { useGpsEnabled, useNow, useRaceChrono } from "@/hooks/use-race-live";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import {
   formatClock,
+  formatDelta,
   formatDuration,
+  formatElapsed,
   formatElevation,
   formatGrade,
   formatKm,
 } from "@/lib/race/format";
-import { buildTimeline, plannedTimeAt } from "@/lib/race/plan";
+import {
+  buildTimeline,
+  plannedDistanceAt,
+  plannedTimeAt,
+  type TimelineEntry,
+} from "@/lib/race/plan";
 import { buildTrack, gradeAt, sampleAt, type Track } from "@/lib/race/track";
 import type { Race } from "@/lib/race/types";
 import { ElevationProfile, profilePlotArea, type ProfileView } from "./elevation-profile";
@@ -29,6 +52,12 @@ const MIN_SPAN_M = 300;
 const TAP_SLOP_PX = 8;
 const DOUBLE_TAP_MS = 320;
 const PRESETS_KM = [1, 2, 5];
+/** En suivi GPS, le coureur est placé à 25 % de la largeur : on voit surtout ce qui arrive. */
+const FOLLOW_ANCHOR = 0.25;
+/** Sans nouvelle mesure depuis ce délai, la position est affichée comme ancienne. */
+const GPS_STALE_MS = 20_000;
+/** Écart au plan considéré « à l'heure ». */
+const ON_TIME_S = 30;
 
 type Gesture =
   | { type: "pan"; startX: number; startY: number; view: ProfileView; moved: boolean }
@@ -62,11 +91,13 @@ function Overview({
   track,
   view,
   cursor,
+  position,
   onCenter,
 }: {
   track: Track;
   view: ProfileView;
   cursor: number | null;
+  position: number | null;
   onCenter: (distance: number) => void;
 }) {
   const W = 1000;
@@ -130,20 +161,63 @@ function Overview({
           vectorEffect="non-scaling-stroke"
         />
       )}
+      {position !== null && (
+        <line
+          x1={(position / total) * W}
+          x2={(position / total) * W}
+          y1={0}
+          y2={H}
+          stroke="var(--me)"
+          strokeWidth={4}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
     </svg>
+  );
+}
+
+/** Temps écoulé depuis le départ : chrono lancé à la main, sinon heure de départ prévue du jour. */
+function elapsedSinceStart(now: number, chronoStart: number | null, startTime: string | null) {
+  if (now === 0) return null;
+  if (chronoStart !== null) return { sec: (now - chronoStart) / 1000, fromChrono: true };
+  if (!startTime) return null;
+  const [h, m] = startTime.split(":").map(Number);
+  const start = new Date(now);
+  start.setHours(h, m, 0, 0);
+  const sec = (now - start.getTime()) / 1000;
+  return sec >= 0 && sec < 16 * 3600 ? { sec, fromChrono: false } : null;
+}
+
+function targetOf(entry: TimelineEntry): { name: string; timeSec: number | null } {
+  if (entry.type === "checkpoint") return { name: entry.checkpoint.label || "Passage", timeSec: entry.checkpoint.timeSec };
+  if (entry.type === "aid") return { name: `🥤 ${entry.aid.name || "Ravito"}`, timeSec: entry.planned?.timeSec ?? null };
+  if (entry.type === "finish") return { name: "🏁 Arrivée", timeSec: entry.planned?.timeSec ?? null };
+  return { name: "Départ", timeSec: 0 };
+}
+
+
+function Stat({ label, children, sub }: { label: string; children: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] text-stone-400 uppercase">{label}</div>
+      <div className="truncate text-lg leading-tight font-bold">{children}</div>
+      {sub && <div className="truncate text-xs text-stone-300">{sub}</div>}
+    </div>
   );
 }
 
 export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) {
   const track = useMemo(() => buildTrack(race.points), [race.points]);
-  const markers = useMemo(
-    () => buildMarkers(buildTimeline(track, race.checkpoints, race.aidStations), race.startTime),
-    [track, race.checkpoints, race.aidStations, race.startTime],
+  const timeline = useMemo(
+    () => buildTimeline(track, race.checkpoints, race.aidStations),
+    [track, race.checkpoints, race.aidStations],
   );
+  const markers = useMemo(() => buildMarkers(timeline, race.startTime), [timeline, race.startTime]);
   const total = track.totalDistance;
 
   const [view, setView] = useState<ProfileView>({ start: 0, end: total });
   const [cursor, setCursor] = useState<number | null>(null);
+  const [follow, setFollow] = useState(true);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -162,6 +236,20 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
     () => false,
   );
 
+  // Jour de course : chrono, GPS, position sur le parcours.
+  const now = useNow(1000);
+  const chrono = useRaceChrono(race.id);
+  const [gpsOn, setGpsOn] = useGpsEnabled();
+  const elapsed = elapsedSinceStart(now, chrono.start, race.startTime);
+  const { fix, error: gpsError } = useGpsPosition({
+    enabled: gpsOn,
+    track,
+    raceId: race.id,
+    planHint: () => (elapsed ? plannedDistanceAt(track, race.checkpoints, elapsed.sec) : null),
+  });
+  const me = gpsOn && fix ? fix.distance : null;
+  const stale = fix !== null && now > 0 && now - fix.timestamp > GPS_STALE_MS;
+
   const clampView = useCallback(
     (start: number, span: number): ProfileView => {
       const s = Math.min(total, Math.max(Math.min(MIN_SPAN_M, total), span));
@@ -170,6 +258,17 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
     },
     [total],
   );
+
+  // En suivi, la vue garde son niveau de zoom et se cale sur le coureur.
+  const following = follow && me !== null;
+  const shownView =
+    me !== null && follow
+      ? clampView(me - (view.end - view.start) * FOLLOW_ANCHOR, view.end - view.start)
+      : view;
+
+  useEffect(() => {
+    viewRef.current = shownView;
+  });
 
   const applyView = (next: ProfileView) => {
     viewRef.current = next;
@@ -188,9 +287,10 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
     return v.start + plotRatioAt(clientX) * (v.end - v.start);
   };
 
-  /** Point autour duquel zoomer : le curseur s'il est visible, sinon le centre de la vue. */
+  /** Point autour duquel zoomer : le coureur suivi, sinon le curseur visible, sinon le centre. */
   const focusPoint = () => {
     const v = viewRef.current;
+    if (me !== null && follow) return me;
     return cursor !== null && cursor >= v.start && cursor <= v.end ? cursor : (v.start + v.end) / 2;
   };
 
@@ -206,6 +306,7 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
   const centerOn = (distance: number) => {
     const v = viewRef.current;
     const span = v.end - v.start;
+    setFollow(false);
     applyView(clampView(distance - span / 2, span));
   };
 
@@ -221,6 +322,7 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
       gesture.current = { type: "pan", startX: e.clientX, startY: e.clientY, view: viewRef.current, moved: false };
     } else if (points.length === 2) {
       const [a, b] = points;
+      setFollow(false);
       gesture.current = {
         type: "pinch",
         startDistance: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)),
@@ -248,7 +350,11 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
     }
 
     const dx = e.clientX - g.startX;
-    if (!g.moved && Math.hypot(dx, e.clientY - g.startY) > TAP_SLOP_PX) g.moved = true;
+    if (!g.moved && Math.hypot(dx, e.clientY - g.startY) > TAP_SLOP_PX) {
+      g.moved = true;
+      // Se déplacer à la main met le suivi GPS en pause (bouton « Me suivre » pour revenir).
+      setFollow(false);
+    }
     if (!g.moved) return;
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -285,17 +391,60 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
     }
   };
 
-  const span = view.end - view.start;
+  const toggleGps = () => {
+    if (!gpsOn) setFollow(true);
+    setGpsOn(!gpsOn);
+  };
+
+  const span = shownView.end - shownView.start;
   const sample = cursor === null ? null : sampleAt(track, cursor);
   const planned = cursor === null ? null : plannedTimeAt(track, race.checkpoints, cursor);
   const clock = planned ? formatClock(race.startTime, planned.timeSec) : null;
   const zoomedOut = span >= total - 1;
   const zoomedIn = span <= Math.min(MIN_SPAN_M, total) + 1;
 
+  // Panneau « en direct » : écart au plan, prochain objectif, reste à faire.
+  let live = null;
+  if (me !== null && fix) {
+    const here = sampleAt(track, me);
+    const plannedHere = plannedTimeAt(track, race.checkpoints, me);
+    const next = timeline.find((entry) => entry.type !== "start" && entry.distance > me + 15);
+    live = {
+      here,
+      delta: elapsed && plannedHere ? elapsed.sec - plannedHere.timeSec : null,
+      next: next
+        ? { ...targetOf(next), distance: next.distance - me, gain: sampleAt(track, next.distance).gain - here.gain }
+        : null,
+      remaining: total - me,
+      remainingGain: track.totalGain - here.gain,
+    };
+  }
+
+  const deltaText =
+    live?.delta == null
+      ? race.checkpoints.length === 0
+        ? "pas de plan"
+        : "appuie sur Départ"
+      : Math.abs(live.delta) < ON_TIME_S
+        ? "à l'heure"
+        : live.delta > 0
+          ? "de retard"
+          : "d'avance";
+  const deltaColor =
+    live?.delta == null || Math.abs(live.delta) < ON_TIME_S ? "" : live.delta > 0 ? "text-red-400" : "text-green-400";
+
   const control = (active = false) =>
     `flex h-12 items-center justify-center rounded-xl text-base font-semibold ring-1 disabled:opacity-35 ${
       active ? "bg-stone-900 text-white ring-stone-900" : "bg-white ring-stone-300 active:bg-stone-200"
     }`;
+
+  const gpsButtonClass = !gpsOn
+    ? "text-stone-700 ring-stone-300"
+    : gpsError && !fix
+      ? "bg-red-50 text-red-700 ring-red-300"
+      : fix && !stale
+        ? "bg-me text-white ring-me"
+        : "animate-pulse bg-sky-50 text-me ring-sky-300";
 
   return (
     <div className="fixed inset-0 flex h-dvh flex-col overscroll-none bg-background">
@@ -304,6 +453,42 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
           <ArrowLeft className="size-6" />
         </Link>
         <div className="min-w-0 flex-1 truncate text-base font-bold">{race.name}</div>
+        {chrono.start === null ? (
+          <button
+            type="button"
+            onClick={chrono.startNow}
+            className="flex items-center gap-1 rounded-full bg-green-600 px-3 py-1.5 text-sm font-bold text-white active:bg-green-700"
+          >
+            <Play className="size-4" /> Départ
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Remettre le chrono à zéro ?")) chrono.reset();
+            }}
+            className="rounded-full px-2 py-1.5 font-mono text-sm font-bold tabular-nums ring-1 ring-stone-300"
+            aria-label="Chrono (toucher pour remettre à zéro)"
+          >
+            {now > 0 ? formatElapsed((now - chrono.start) / 1000) : "…"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={toggleGps}
+          className={`ml-1 flex items-center gap-1 rounded-full px-2.5 py-1.5 text-sm font-bold ring-1 ${gpsButtonClass}`}
+          aria-pressed={gpsOn}
+          aria-label={gpsOn ? "Couper le GPS" : "Activer le GPS"}
+        >
+          {!gpsOn ? (
+            <LocateOff className="size-5" />
+          ) : fix && !stale ? (
+            <LocateFixed className="size-5" />
+          ) : (
+            <Locate className="size-5" />
+          )}
+          GPS
+        </button>
         {fullscreenSupported && (
           <button
             type="button"
@@ -320,25 +505,12 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
         {sample ? (
           <>
             <div className="grid flex-1 grid-cols-4 gap-x-2 font-mono tabular-nums">
-              <div>
-                <div className="text-[10px] text-stone-400 uppercase">Km</div>
-                <div className="text-lg leading-tight font-bold">{formatKm(sample.distance, 1)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-stone-400 uppercase">Alt.</div>
-                <div className="text-lg leading-tight font-bold">{Math.round(sample.ele)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-stone-400 uppercase">Pente</div>
-                <div className="text-lg leading-tight font-bold">{formatGrade(gradeAt(track, sample.distance))}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-stone-400 uppercase">Prévu</div>
-                <div className="text-lg leading-tight font-bold">
-                  {planned ? `${planned.kind === "target" ? "" : "≈"}${formatDuration(planned.timeSec)}` : "–"}
-                </div>
-                {clock && <div className="text-xs text-stone-300">{clock}</div>}
-              </div>
+              <Stat label="Km">{formatKm(sample.distance, 1)}</Stat>
+              <Stat label="Alt.">{Math.round(sample.ele)}</Stat>
+              <Stat label="Pente">{formatGrade(gradeAt(track, sample.distance))}</Stat>
+              <Stat label="Prévu" sub={clock}>
+                {planned ? `${planned.kind === "target" ? "" : "≈"}${formatDuration(planned.timeSec)}` : "–"}
+              </Stat>
             </div>
             <button
               type="button"
@@ -349,9 +521,55 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
               <X className="size-5" />
             </button>
           </>
+        ) : live && fix ? (
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="grid grid-cols-3 gap-x-2 font-mono tabular-nums">
+              <Stat label="Km" sub={`${Math.round(live.here.ele)} m · ${formatGrade(gradeAt(track, live.here.distance))}`}>
+                {formatKm(live.here.distance, 2)}
+              </Stat>
+              <Stat
+                label="Écart au plan"
+                sub={live.delta != null && elapsed && !elapsed.fromChrono ? `${deltaText} (${race.startTime})` : deltaText}
+              >
+                <span className={deltaColor}>{live.delta == null ? "–" : formatDelta(live.delta)}</span>
+              </Stat>
+              <Stat label="Reste" sub={`D+ ${formatElevation(live.remainingGain)}`}>
+                {formatKm(live.remaining, 1)} km
+              </Stat>
+            </div>
+            {live.next && (
+              <div className="truncate text-sm">
+                <span className="text-stone-400">→ </span>
+                <span className="font-semibold">{live.next.name}</span>
+                <span className="text-stone-300">
+                  {" "}
+                  · {formatKm(live.next.distance, 1)} km · D+ {formatElevation(Math.max(0, live.next.gain))}
+                  {live.next.timeSec !== null &&
+                    ` · ${formatDuration(live.next.timeSec)}${
+                      race.startTime ? ` (${formatClock(race.startTime, live.next.timeSec)})` : ""
+                    }`}
+                </span>
+              </div>
+            )}
+            {(stale || !fix.onTrack || fix.accuracy > 50) && (
+              <div className="flex items-center gap-1 text-xs text-amber-300">
+                <TriangleAlert className="size-3.5" />
+                {stale
+                  ? "Signal GPS perdu : dernière position connue"
+                  : !fix.onTrack
+                    ? `Hors trace (${Math.round(fix.offset)} m)`
+                    : `GPS imprécis (±${Math.round(fix.accuracy)} m)`}
+              </div>
+            )}
+          </div>
+        ) : gpsOn ? (
+          <p className="text-sm leading-snug text-stone-300">
+            {gpsError ?? "Recherche du signal GPS… (reste à ciel ouvert quelques secondes)"}
+          </p>
         ) : (
           <p className="text-sm leading-snug text-stone-300">
-            Touche le profil pour lire un point. Pince ou double-tape pour zoomer, glisse pour te déplacer.
+            Active le GPS pour te voir sur le profil. Touche le profil pour lire un point, pince ou double-tape
+            pour zoomer.
           </p>
         )}
       </div>
@@ -365,19 +583,37 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
         onPointerCancel={onPointerEnd}
         onWheel={(e) => zoom(e.deltaY < 0 ? 1.25 : 0.8, distanceAt(e.clientX))}
       >
-        <ElevationProfile track={track} markers={markers} cursor={cursor} view={view} variant="focus" />
+        <ElevationProfile
+          track={track}
+          markers={markers}
+          cursor={cursor}
+          view={shownView}
+          variant="focus"
+          position={me !== null ? { distance: me, stale } : null}
+        />
+        {me !== null && !following && (
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setFollow(true)}
+            className="absolute right-3 bottom-10 flex items-center gap-1.5 rounded-full bg-me px-4 py-2.5 text-sm font-bold text-white shadow-lg"
+          >
+            <LocateFixed className="size-5" /> Me suivre
+          </button>
+        )}
       </div>
 
       <div className="shrink-0 px-2 pt-1">
         <div className="mb-1 flex justify-between text-xs text-stone-600 tabular-nums">
           <span>
-            km {formatKm(view.start, 1)} → {formatKm(view.end, 1)}
+            km {formatKm(shownView.start, 1)} → {formatKm(shownView.end, 1)}
           </span>
           <span>
-            {formatKm(span, 1)} km affichés · D+ {formatElevation(sampleAt(track, view.end).gain - sampleAt(track, view.start).gain)}
+            {formatKm(span, 1)} km affichés · D+{" "}
+            {formatElevation(sampleAt(track, shownView.end).gain - sampleAt(track, shownView.start).gain)}
           </span>
         </div>
-        <Overview track={track} view={view} cursor={cursor} onCenter={centerOn} />
+        <Overview track={track} view={shownView} cursor={cursor} position={me} onCenter={centerOn} />
       </div>
 
       <div className="grid shrink-0 grid-cols-6 gap-1.5 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -398,7 +634,10 @@ export function RaceFocus({ race, backHref }: { race: Race; backHref: string }) 
         <button
           type="button"
           className={control(zoomedOut)}
-          onClick={() => applyView({ start: 0, end: total })}
+          onClick={() => {
+            setFollow(false);
+            applyView({ start: 0, end: total });
+          }}
         >
           Tout
         </button>
